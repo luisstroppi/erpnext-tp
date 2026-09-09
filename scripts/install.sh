@@ -88,8 +88,8 @@ fi
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 # Codespaces can expose a very new Python as `python3` (for example 3.14).
-# Frappe v15 is better served by a stable, supported interpreter, so Bench is
-# explicitly installed and initialized with Python 3.12 through uv.
+# Frappe v15 is better served by a stable interpreter, so Bench and the
+# bench virtualenv are explicitly pinned to Python 3.12 through uv.
 uv python install "$BENCH_PYTHON"
 BENCH_PYTHON_PATH="$(uv python find "$BENCH_PYTHON")"
 
@@ -104,14 +104,29 @@ bench --version
 ok "Runtime toolchain installed"
 
 log "6/10 - Creating Frappe bench (${FRAPPE_BRANCH})"
-if [[ ! -d "$BENCH_DIR/apps/frappe" ]]; then
-  rm -rf "$BENCH_DIR"
+BENCH_VALID=false
+if [[ -d "$BENCH_DIR/apps/frappe" && -x "$BENCH_DIR/env/bin/python" ]]; then
+  if "$BENCH_DIR/env/bin/python" -c 'import click; import frappe' >/dev/null 2>&1; then
+    BENCH_VALID=true
+  fi
+fi
+
+if [[ "$BENCH_VALID" != true ]]; then
+  if [[ -e "$BENCH_DIR" ]]; then
+    warn "Incomplete or broken bench detected at $BENCH_DIR; rebuilding it."
+    rm -rf "$BENCH_DIR"
+  fi
   mkdir -p "$(dirname "$BENCH_DIR")"
   bench init --python "$BENCH_PYTHON_PATH" --frappe-branch "$FRAPPE_BRANCH" "$BENCH_DIR"
 else
-  ok "Existing Frappe bench detected; skipping bench init"
+  ok "Existing Frappe bench is healthy; skipping bench init"
 fi
 cd "$BENCH_DIR"
+
+# Fail early with a useful message if bench init returned but the runtime is unusable.
+[[ -x "env/bin/python" ]] || die "Bench virtualenv was not created correctly."
+"env/bin/python" -c 'import click; import frappe' >/dev/null 2>&1 || \
+  die "Bench virtualenv is incomplete: Frappe/Python dependencies cannot be imported."
 
 log "7/10 - Creating site ${SITE_NAME}"
 if [[ ! -f "sites/${SITE_NAME}/site_config.json" ]]; then
