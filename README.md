@@ -1,35 +1,22 @@
 # ERPNext en GitHub Codespaces (sin Docker)
 
-Laboratorio didáctico para instalar y ejecutar **ERPNext v15** directamente sobre un GitHub Codespace, evitando Docker para reducir el consumo de memoria, almacenamiento y tiempo de descarga.
+Laboratorio didáctico para instalar y ejecutar **ERPNext v15** directamente sobre un GitHub Codespace, evitando un stack Docker de ERPNext para reducir consumo y hacer visible su arquitectura.
 
 ## Objetivo
 
-Al finalizar la práctica, el estudiante podrá:
+Al finalizar la práctica, el estudiante podrá identificar los componentes del stack ERPNext/Frappe, crear un site, instalar ERPNext y distinguir **Bench**, **Frappe**, **Site** y **ERPNext**.
 
-- identificar los componentes principales del stack de ERPNext/Frappe;
-- preparar un entorno Linux reproducible en GitHub Codespaces;
-- instalar y configurar MariaDB, Redis, Python, Node.js, Yarn y Bench;
-- crear un sitio Frappe;
-- instalar ERPNext sobre ese sitio;
-- iniciar, detener y diagnosticar el entorno;
-- comprender la diferencia entre **Bench**, **Frappe**, **Site** y **ERPNext**.
-
-## Arquitectura del laboratorio
+## Arquitectura
 
 ```text
-GitHub Repository
-       │
-       ▼
-GitHub Codespace
-Ubuntu Linux
+GitHub Codespace (Ubuntu)
        │
        ├── MariaDB
        ├── Redis
        ├── Python
        ├── Node.js / Yarn
        └── Bench
-            │
-            └── frappe-bench/
+            └── /workspaces/frappe-bench/
                  ├── apps/
                  │    ├── frappe
                  │    └── erpnext
@@ -37,33 +24,25 @@ Ubuntu Linux
                       └── erp.localhost
 ```
 
-## ¿Por qué sin Docker?
-
-La imagen oficial de ERPNext está pensada para despliegues completos y suele involucrar varios servicios/contenedores. En un Codespace pequeño, eso agrega consumo de RAM y disco que no aporta demasiado valor pedagógico para una primera práctica.
-
-En este laboratorio los servicios se ejecutan directamente sobre Linux. Así los estudiantes pueden observar con mayor claridad qué necesita ERPNext para funcionar.
-
-## Requisitos
-
-- Cuenta de GitHub con acceso a Codespaces.
-- Codespace basado en este repositorio.
-- Recomendado: máquina de al menos 2 cores / 8 GB de RAM si está disponible en tu cuota. El laboratorio intenta funcionar con el menor footprint posible, pero la fase de instalación puede ser intensiva.
+> Codespaces utiliza un dev container para proporcionar la máquina de desarrollo, pero **no usamos las imágenes/Compose de ERPNext**. MariaDB, Redis, Frappe y ERPNext se ejecutan directamente en ese entorno Linux.
 
 ## Inicio rápido
 
-Dentro del Codespace:
+1. En GitHub, abrir **Code → Codespaces → Create codespace on main** (o sobre la rama indicada por el docente).
+2. Esperar a que VS Code termine de abrir el entorno.
+3. En la terminal del repositorio ejecutar:
 
 ```bash
-./scripts/install.sh
+bash scripts/install.sh
 ```
 
-Cuando finalice la instalación:
+4. Cuando termine:
 
 ```bash
-./scripts/start.sh
+bash scripts/start.sh
 ```
 
-El servidor de desarrollo de Frappe escucha en el puerto **8000**. Codespaces publicará ese puerto automáticamente.
+5. Abrir el puerto **8000** desde la pestaña **Ports** de Codespaces.
 
 Credenciales del laboratorio:
 
@@ -72,78 +51,59 @@ Usuario: Administrator
 Contraseña: admin
 ```
 
-> Estas credenciales son deliberadamente simples porque el entorno es descartable y educativo. No deben utilizarse en producción.
+Estas credenciales son deliberadamente simples para un entorno descartable. **No son aptas para producción.**
 
-## Comandos principales
-
-### Instalar
+## Comandos
 
 ```bash
-./scripts/install.sh
+# instalación (una vez)
+bash scripts/install.sh
+
+# iniciar después de crear/reabrir el Codespace
+bash scripts/start.sh
+
+# diagnóstico
+bash scripts/status.sh
+
+# detener MariaDB y Redis al terminar
+bash scripts/stop.sh
 ```
 
-El script es idempotente en la medida de lo posible: puede ejecutarse nuevamente para completar una instalación interrumpida.
+Los scripts se invocan con `bash` para que la práctica no dependa del bit ejecutable de los archivos descargados mediante GitHub.
 
-### Iniciar
+## Qué hace la instalación
 
-```bash
-./scripts/start.sh
-```
+1. comprueba recursos disponibles;
+2. instala dependencias Linux mínimas;
+3. configura MariaDB para Frappe;
+4. inicia y verifica Redis;
+5. instala Node.js, Yarn, `uv` y Bench;
+6. crea `/workspaces/frappe-bench` con Frappe `version-15`;
+7. crea `erp.localhost`;
+8. descarga ERPNext `version-15`;
+9. instala ERPNext sobre el site;
+10. configura el entorno de desarrollo.
 
-### Detener
-
-```bash
-./scripts/stop.sh
-```
-
-### Diagnóstico
-
-```bash
-./scripts/status.sh
-```
-
-## Qué hace `install.sh`
-
-El proceso está dividido en etapas visibles:
-
-1. valida el entorno;
-2. instala dependencias del sistema;
-3. prepara MariaDB;
-4. prepara Redis;
-5. instala Node.js, Yarn y Bench;
-6. crea `frappe-bench` con Frappe v15;
-7. crea el sitio `erp.localhost`;
-8. descarga ERPNext v15;
-9. instala ERPNext en el sitio;
-10. aplica configuración de desarrollo y muestra un resumen final.
+El script evita repetir las operaciones costosas si detecta un bench, site o ERPNext ya existentes. Esto permite reintentarlo después de una instalación interrumpida.
 
 ## Conceptos clave
 
-### Bench
-
-Bench es la herramienta de administración del entorno Frappe. Permite crear benches, sitios, instalar aplicaciones, ejecutar migraciones y levantar los procesos de desarrollo.
-
-### Frappe Framework
-
-Es el framework web sobre el cual está construido ERPNext.
-
-### Site
-
-Un site representa una instancia lógica con su propia base de datos y configuración. Un mismo bench puede alojar múltiples sites.
-
-### ERPNext
-
-ERPNext es una aplicación Frappe que se instala sobre un site.
-
 ```text
-Bench
- ├── Frappe Framework
- ├── ERPNext App
- └── Sites
-      └── erp.localhost
+Bench             herramienta que administra el ambiente
+Frappe Framework  framework sobre el que se construye ERPNext
+ERPNext            aplicación empresarial Frappe
+Site               instancia lógica con base de datos/configuración propia
 ```
 
-## Estructura del repositorio
+Un mismo bench puede alojar múltiples sites, lo que permite introducir el concepto de multitenancy.
+
+## ¿Por qué sin el stack Docker de ERPNext?
+
+El despliegue Docker completo agrega capas y servicios que son útiles en otros escenarios, pero aumentan el footprint y ocultan parte de la arquitectura. En esta práctica queremos observar directamente MariaDB, Redis, Bench, Frappe y ERPNext.
+
+No instalamos Nginx, Supervisor ni TLS: usamos `bench start` y el port forwarding de Codespaces porque el objetivo es **docencia/desarrollo**, no producción.
+
+## Estructura
 
 ```text
 .
@@ -161,23 +121,19 @@ Bench
 └── README.md
 ```
 
-## Advertencias
+## Documentación
 
-Este proyecto está orientado exclusivamente a **desarrollo, demostración y docencia**.
+- [1. Arquitectura](docs/01-arquitectura.md)
+- [2. Instalación paso a paso](docs/02-instalacion.md)
+- [3. Práctica para estudiantes](docs/03-practica.md)
 
-No incluye una configuración de producción con Nginx, Supervisor/systemd, TLS, backups, hardening de MariaDB ni gestión segura de secretos.
+## Alcance y seguridad
 
-## Versión objetivo
+Este repositorio está orientado exclusivamente a **desarrollo, demostración y docencia**. No constituye una guía de producción: faltan, entre otras cosas, proxy web, TLS, gestión productiva de procesos, backups, hardening, observabilidad y gestión segura de secretos.
 
-La práctica fija explícitamente:
+## Versiones objetivo
 
 - Frappe: `version-15`
 - ERPNext: `version-15`
 
-Esto reduce el riesgo de que cambios en ramas de desarrollo rompan la actividad durante el cursado.
-
-## Documentación de la práctica
-
-- [Arquitectura](docs/01-arquitectura.md)
-- [Instalación paso a paso](docs/02-instalacion.md)
-- [Consigna para estudiantes](docs/03-practica.md)
+Fijar las ramas reduce la variabilidad de la práctica durante el cursado.
