@@ -56,8 +56,6 @@ default-character-set = utf8mb4
 EOF
 sudo service mariadb restart
 
-# Frappe connects to MariaDB over TCP in this Codespaces setup. MariaDB treats
-# root@localhost and root@127.0.0.1 as separate accounts, so provision both.
 if sudo mariadb -e 'SELECT 1' >/dev/null 2>&1; then
   sudo mariadb <<SQL
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
@@ -102,9 +100,6 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-# Codespaces can expose a very new Python as `python3` (for example 3.14).
-# Frappe v15 is better served by a stable interpreter, so Bench and the
-# bench virtualenv are explicitly pinned to Python 3.12 through uv.
 uv python install "$BENCH_PYTHON"
 BENCH_PYTHON_PATH="$(uv python find "$BENCH_PYTHON")"
 
@@ -142,15 +137,60 @@ cd "$BENCH_DIR"
 "env/bin/python" -c 'import click; import frappe' >/dev/null 2>&1 || \
   die "Bench virtualenv is incomplete: Frappe/Python dependencies cannot be imported."
 
-log "7/10 - Creating site ${SITE_NAME}"
-if [[ ! -f "sites/${SITE_NAME}/site_config.json" ]]; then
+log "7/10 - Creating or validating site ${SITE_NAME}"
+SITE_CONFIG="sites/${SITE_NAME}/site_config.json"
+
+if [[ ! -f "$SITE_CONFIG" ]]; then
   bench new-site "$SITE_NAME" \
     --mariadb-root-password "$DB_ROOT_PASSWORD" \
     --admin-password "$ADMIN_PASSWORD" \
-    --mariadb-user-host-login-scope='127.0.0.1'
-else
-  ok "Site already exists; skipping creation"
+    --mariadb-user-host-login-scope='%'
 fi
+
+if ! bench --site "$SITE_NAME" list-apps >/dev/null 2>&1; then
+  warn "Site exists but cannot authenticate to MariaDB; repairing the site database user."
+
+  readarray -t SITE_DB_VALUES < <("env/bin/python" - "$SITE_CONFIG" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding='utf-8') as f:
+    config = json.load(f)
+print(config.get('db_name', ''))
+print(config.get('db_password', ''))
+PY
+)
+
+  SITE_DB_NAME="${SITE_DB_VALUES[0]:-}"
+  SITE_DB_PASSWORD="${SITE_DB_VALUES[1]:-}"
+
+  [[ "$SITE_DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || die "Unsafe or missing db_name in site_config.json."
+  [[ -n "$SITE_DB_PASSWORD" ]] || die "Missing db_password in site_config.json."
+
+  SITE_DB_NAME="$SITE_DB_NAME" \
+  SITE_DB_PASSWORD="$SITE_DB_PASSWORD" \
+  DB_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
+  "env/bin/python" <<'PY'
+import os
+import pymysql
+
+name = os.environ['SITE_DB_NAME']
+password = os.environ['SITE_DB_PASSWORD']
+root_password = os.environ['DB_ROOT_PASSWORD']
+
+conn = pymysql.connect(host='127.0.0.1', user='root', password=root_password, autocommit=True)
+try:
+    with conn.cursor() as cur:
+        cur.execute(f"CREATE USER IF NOT EXISTS `{name}`@'%' IDENTIFIED BY %s", (password,))
+        cur.execute(f"ALTER USER `{name}`@'%' IDENTIFIED BY %s", (password,))
+        cur.execute(f"GRANT ALL PRIVILEGES ON `{name}`.* TO `{name}`@'%'")
+        cur.execute("FLUSH PRIVILEGES")
+finally:
+    conn.close()
+PY
+fi
+
+bench --site "$SITE_NAME" list-apps >/dev/null 2>&1 || \
+  die "Site still cannot connect to MariaDB after repairing its database user."
+ok "Site database connection verified"
 
 log "8/10 - Downloading ERPNext (${ERPNEXT_BRANCH})"
 if [[ ! -d "apps/erpnext" ]]; then
