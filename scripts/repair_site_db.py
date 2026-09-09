@@ -5,6 +5,8 @@ import sys
 
 import pymysql
 
+PARTIAL_SITE_EXIT = 42
+
 bench_dir = os.environ.get("ERP_TP_BENCH_DIR", "/workspaces/frappe-bench")
 site_name = os.environ.get("ERP_TP_SITE", "erp.localhost")
 root_password = os.environ.get("ERP_TP_DB_ROOT_PASSWORD", "root")
@@ -22,6 +24,32 @@ if not name.replace("_", "").isalnum():
 root = pymysql.connect(host="127.0.0.1", user="root", password=root_password, autocommit=True)
 try:
     with root.cursor() as cur:
+        cur.execute("SHOW DATABASES LIKE %s", (name,))
+        database_exists = cur.fetchone() is not None
+
+        schema_complete = False
+        if database_exists:
+            cur.execute(
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_schema=%s AND table_name='tabDefaultValue'",
+                (name,),
+            )
+            schema_complete = cur.fetchone()[0] == 1
+
+        if not database_exists or not schema_complete:
+            print(
+                f"Site {site_name} is incomplete: "
+                + ("database is missing." if not database_exists else "Frappe schema is incomplete.")
+            )
+            # This is a disposable teaching site that never completed new-site.
+            # Remove only the database/user artifacts associated with its generated DB name.
+            cur.execute(f"DROP DATABASE IF EXISTS `{name}`")
+            for host in ("127.0.0.1", "localhost", "%"):
+                host_sql = host.replace("'", "''")
+                cur.execute(f"DROP USER IF EXISTS `{name}`@'{host_sql}'")
+            cur.execute("FLUSH PRIVILEGES")
+            raise SystemExit(PARTIAL_SITE_EXIT)
+
         for host in ("127.0.0.1", "localhost"):
             cur.execute(f"CREATE USER IF NOT EXISTS `{name}`@'{host}' IDENTIFIED BY %s", (password,))
             cur.execute(f"ALTER USER `{name}`@'{host}' IDENTIFIED BY %s", (password,))
