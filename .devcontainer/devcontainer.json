@@ -1,0 +1,23 @@
+{
+  "name": "ERPNext v15 - Native Lab",
+  "image": "mcr.microsoft.com/devcontainers/base:ubuntu-24.04",
+  "forwardPorts": [8000],
+  "portsAttributes": {
+    "8000": {
+      "label": "ERPNext",
+      "onAutoForward": "notify"
+    }
+  },
+  "remoteUser": "vscode",
+  "containerEnv": {
+    "ERP_TP_BENCH_DIR": "/workspaces/frappe-bench",
+    "ERP_TP_SITE": "erp.localhost"
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-python.python"
+      ]
+    }
+  }
+}
