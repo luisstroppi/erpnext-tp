@@ -10,17 +10,18 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 command -v bench >/dev/null 2>&1 || { echo "bench is not available on PATH." >&2; exit 1; }
 
 sudo service mariadb start
-sudo service redis-server start
-
-redis-cli ping | grep -q PONG || { echo "Redis is not responding." >&2; exit 1; }
 mariadb-admin ping -uroot -p"${ERP_TP_DB_ROOT_PASSWORD:-root}" --silent || { echo "MariaDB is not responding." >&2; exit 1; }
 
+# Do not start the system Redis service here. `bench start` launches the
+# Redis Queue and Redis Cache instances defined by the bench Procfile/config.
 cd "$BENCH_DIR"
 bench use "$SITE_NAME" >/dev/null
 
 echo "Starting ERPNext development environment..."
 echo "Site: $SITE_NAME"
-echo "Port: 8000"
+echo "Web port: 8000"
+echo "Redis Queue: 11000"
+echo "Redis Cache: 13000"
 echo "Stop with Ctrl+C."
 echo
 
