@@ -11,6 +11,7 @@ SITE_NAME="${ERP_TP_SITE:-erp.localhost}"
 DB_ROOT_PASSWORD="${ERP_TP_DB_ROOT_PASSWORD:-root}"
 ADMIN_PASSWORD="${ERP_TP_ADMIN_PASSWORD:-admin}"
 BENCH_PYTHON="${ERP_TP_BENCH_PYTHON:-3.12}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
@@ -149,46 +150,10 @@ fi
 
 if ! bench --site "$SITE_NAME" list-apps >/dev/null 2>&1; then
   warn "Site exists but cannot authenticate to MariaDB; repairing the site database user."
-
-  readarray -t SITE_DB_VALUES < <("env/bin/python" - "$SITE_CONFIG" <<'PY'
-import json, sys
-with open(sys.argv[1], encoding='utf-8') as f:
-    config = json.load(f)
-print(config.get('db_name', ''))
-print(config.get('db_password', ''))
-PY
-)
-
-  SITE_DB_NAME="${SITE_DB_VALUES[0]:-}"
-  SITE_DB_PASSWORD="${SITE_DB_VALUES[1]:-}"
-
-  [[ "$SITE_DB_NAME" =~ ^[A-Za-z0-9_]+$ ]] || die "Unsafe or missing db_name in site_config.json."
-  [[ -n "$SITE_DB_PASSWORD" ]] || die "Missing db_password in site_config.json."
-
-  SITE_DB_NAME="$SITE_DB_NAME" \
-  SITE_DB_PASSWORD="$SITE_DB_PASSWORD" \
-  DB_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
-  "env/bin/python" <<'PY'
-import os
-import pymysql
-
-name = os.environ['SITE_DB_NAME']
-password = os.environ['SITE_DB_PASSWORD']
-root_password = os.environ['DB_ROOT_PASSWORD']
-
-conn = pymysql.connect(host='127.0.0.1', user='root', password=root_password, autocommit=True)
-try:
-    with conn.cursor() as cur:
-        # PyMySQL uses %-formatting for parameterized statements. A literal
-        # wildcard host must therefore be written as %% when the query also
-        # contains a %s placeholder.
-        cur.execute(f"CREATE USER IF NOT EXISTS `{name}`@'%%' IDENTIFIED BY %s", (password,))
-        cur.execute(f"ALTER USER `{name}`@'%%' IDENTIFIED BY %s", (password,))
-        cur.execute(f"GRANT ALL PRIVILEGES ON `{name}`.* TO `{name}`@'%'")
-        cur.execute("FLUSH PRIVILEGES")
-finally:
-    conn.close()
-PY
+  ERP_TP_BENCH_DIR="$BENCH_DIR" \
+  ERP_TP_SITE="$SITE_NAME" \
+  ERP_TP_DB_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
+    "$BENCH_DIR/env/bin/python" "$SCRIPT_DIR/repair_site_db.py"
 fi
 
 bench --site "$SITE_NAME" list-apps >/dev/null 2>&1 || \
