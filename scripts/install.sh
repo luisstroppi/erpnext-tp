@@ -49,22 +49,37 @@ character-set-client-handshake = FALSE
 character-set-server = utf8mb4
 collation-server = utf8mb4_unicode_ci
 skip-name-resolve
+bind-address = 127.0.0.1
 
 [mysql]
 default-character-set = utf8mb4
 EOF
 sudo service mariadb restart
 
+# Frappe connects to MariaDB over TCP in this Codespaces setup. MariaDB treats
+# root@localhost and root@127.0.0.1 as separate accounts, so provision both.
 if sudo mariadb -e 'SELECT 1' >/dev/null 2>&1; then
   sudo mariadb <<SQL
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
+CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
+ALTER USER 'root'@'127.0.0.1' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 SQL
 elif mariadb -uroot -p"$DB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; then
+  mariadb -uroot -p"$DB_ROOT_PASSWORD" <<SQL
+CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
+ALTER USER 'root'@'127.0.0.1' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
+FLUSH PRIVILEGES;
+SQL
   ok "MariaDB root password already configured"
 else
   die "Unable to authenticate to MariaDB as root."
 fi
+
+mariadb -h127.0.0.1 -uroot -p"$DB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1 || \
+  die "MariaDB TCP authentication for root@127.0.0.1 is not working."
 ok "MariaDB configured"
 
 log "4/10 - Starting Redis"
@@ -123,7 +138,6 @@ else
 fi
 cd "$BENCH_DIR"
 
-# Fail early with a useful message if bench init returned but the runtime is unusable.
 [[ -x "env/bin/python" ]] || die "Bench virtualenv was not created correctly."
 "env/bin/python" -c 'import click; import frappe' >/dev/null 2>&1 || \
   die "Bench virtualenv is incomplete: Frappe/Python dependencies cannot be imported."
@@ -133,7 +147,7 @@ if [[ ! -f "sites/${SITE_NAME}/site_config.json" ]]; then
   bench new-site "$SITE_NAME" \
     --mariadb-root-password "$DB_ROOT_PASSWORD" \
     --admin-password "$ADMIN_PASSWORD" \
-    --no-mariadb-socket
+    --mariadb-user-host-login-scope='127.0.0.1'
 else
   ok "Site already exists; skipping creation"
 fi
