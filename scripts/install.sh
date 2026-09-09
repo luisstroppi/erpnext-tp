@@ -179,8 +179,11 @@ root_password = os.environ['DB_ROOT_PASSWORD']
 conn = pymysql.connect(host='127.0.0.1', user='root', password=root_password, autocommit=True)
 try:
     with conn.cursor() as cur:
-        cur.execute(f"CREATE USER IF NOT EXISTS `{name}`@'%' IDENTIFIED BY %s", (password,))
-        cur.execute(f"ALTER USER `{name}`@'%' IDENTIFIED BY %s", (password,))
+        # PyMySQL uses %-formatting for parameterized statements. A literal
+        # wildcard host must therefore be written as %% when the query also
+        # contains a %s placeholder.
+        cur.execute(f"CREATE USER IF NOT EXISTS `{name}`@'%%' IDENTIFIED BY %s", (password,))
+        cur.execute(f"ALTER USER `{name}`@'%%' IDENTIFIED BY %s", (password,))
         cur.execute(f"GRANT ALL PRIVILEGES ON `{name}`.* TO `{name}`@'%'")
         cur.execute("FLUSH PRIVILEGES")
 finally:
