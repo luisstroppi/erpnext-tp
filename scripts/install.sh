@@ -10,6 +10,7 @@ BENCH_DIR="${ERP_TP_BENCH_DIR:-/workspaces/frappe-bench}"
 SITE_NAME="${ERP_TP_SITE:-erp.localhost}"
 DB_ROOT_PASSWORD="${ERP_TP_DB_ROOT_PASSWORD:-root}"
 ADMIN_PASSWORD="${ERP_TP_ADMIN_PASSWORD:-admin}"
+BENCH_PYTHON="${ERP_TP_BENCH_PYTHON:-3.12}"
 
 log()  { printf '\n\033[1;34m==> %s\033[0m\n' "$*"; }
 ok()   { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
@@ -29,7 +30,7 @@ warn "The build phase can temporarily consume considerably more RAM than normal 
 log "2/10 - Installing minimal system dependencies"
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-  git curl ca-certificates build-essential pkg-config \
+  git curl ca-certificates build-essential pkg-config cron \
   python3 python3-dev python3-venv python3-pip \
   mariadb-server mariadb-client libmariadb-dev libmariadb-dev-compat \
   redis-server \
@@ -38,6 +39,7 @@ sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
   libldap2-dev libsasl2-dev
 sudo apt-get clean
 sudo rm -rf /var/lib/apt/lists/*
+command -v crontab >/dev/null 2>&1 || die "crontab was not installed correctly."
 ok "System packages installed"
 
 log "3/10 - Configuring MariaDB for Frappe"
@@ -53,8 +55,6 @@ default-character-set = utf8mb4
 EOF
 sudo service mariadb restart
 
-# First run normally has unix_socket authentication; subsequent runs use the
-# known lab password. Support both paths so the script remains repeatable.
 if sudo mariadb -e 'SELECT 1' >/dev/null 2>&1; then
   sudo mariadb <<SQL
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
@@ -86,19 +86,28 @@ if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
+# Codespaces can expose a very new Python as `python3` (for example 3.14).
+# Frappe v15 is better served by a stable, supported interpreter, so Bench is
+# explicitly installed and initialized with Python 3.12 through uv.
+uv python install "$BENCH_PYTHON"
+BENCH_PYTHON_PATH="$(uv python find "$BENCH_PYTHON")"
+
 if ! command -v bench >/dev/null 2>&1; then
-  uv tool install frappe-bench
+  uv tool install --python "$BENCH_PYTHON_PATH" frappe-bench
 fi
 command -v bench >/dev/null 2>&1 || die "bench is not available on PATH."
 node --version
 yarn --version
+"$BENCH_PYTHON_PATH" --version
 bench --version
 ok "Runtime toolchain installed"
 
 log "6/10 - Creating Frappe bench (${FRAPPE_BRANCH})"
 if [[ ! -d "$BENCH_DIR/apps/frappe" ]]; then
+  rm -rf "$BENCH_DIR"
   mkdir -p "$(dirname "$BENCH_DIR")"
-  bench init --frappe-branch "$FRAPPE_BRANCH" "$BENCH_DIR"
+  bench init --python "$BENCH_PYTHON_PATH" --frappe-branch "$FRAPPE_BRANCH" "$BENCH_DIR"
 else
   ok "Existing Frappe bench detected; skipping bench init"
 fi
@@ -144,14 +153,15 @@ Site:        $SITE_NAME
 User:        Administrator
 Password:    $ADMIN_PASSWORD
 Port:        8000
+Python:      $BENCH_PYTHON
 
 Start ERPNext with:
 
-  ./scripts/start.sh
+  bash scripts/start.sh
 
 Check the environment with:
 
-  ./scripts/status.sh
+  bash scripts/status.sh
 
 IMPORTANT: these credentials and settings are for a disposable
 teaching environment only. They are NOT suitable for production.
