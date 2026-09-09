@@ -138,27 +138,44 @@ cd "$BENCH_DIR"
 "env/bin/python" -c 'import click; import frappe' >/dev/null 2>&1 || \
   die "Bench virtualenv is incomplete: Frappe/Python dependencies cannot be imported."
 
-log "7/10 - Creating or validating site ${SITE_NAME}"
-SITE_CONFIG="sites/${SITE_NAME}/site_config.json"
-
-if [[ ! -f "$SITE_CONFIG" ]]; then
+create_site() {
   bench new-site "$SITE_NAME" \
     --mariadb-root-password "$DB_ROOT_PASSWORD" \
     --admin-password "$ADMIN_PASSWORD" \
     --mariadb-user-host-login-scope='%'
+}
+
+log "7/10 - Creating or validating site ${SITE_NAME}"
+SITE_CONFIG="sites/${SITE_NAME}/site_config.json"
+
+if [[ ! -f "$SITE_CONFIG" ]]; then
+  create_site
 fi
 
 if ! bench --site "$SITE_NAME" list-apps >/dev/null 2>&1; then
-  warn "Site exists but cannot authenticate to MariaDB; repairing the site database user."
+  warn "Site is not healthy; checking whether it can be repaired or must be recreated."
+
+  set +e
   ERP_TP_BENCH_DIR="$BENCH_DIR" \
   ERP_TP_SITE="$SITE_NAME" \
   ERP_TP_DB_ROOT_PASSWORD="$DB_ROOT_PASSWORD" \
     "$BENCH_DIR/env/bin/python" "$SCRIPT_DIR/repair_site_db.py"
+  REPAIR_STATUS=$?
+  set -e
+
+  if [[ "$REPAIR_STATUS" -eq 42 ]]; then
+    BROKEN_SITE="sites/${SITE_NAME}.incomplete.$(date +%s)"
+    warn "Previous new-site did not complete. Preserving its files at $BROKEN_SITE and recreating the site."
+    mv "sites/${SITE_NAME}" "$BROKEN_SITE"
+    create_site
+  elif [[ "$REPAIR_STATUS" -ne 0 ]]; then
+    die "Site database repair failed with exit code $REPAIR_STATUS."
+  fi
 fi
 
 bench --site "$SITE_NAME" list-apps >/dev/null 2>&1 || \
-  die "Site still cannot connect to MariaDB after repairing its database user."
-ok "Site database connection verified"
+  die "Site is still unhealthy after repair/recreation."
+ok "Site database connection and Frappe schema verified"
 
 log "8/10 - Downloading ERPNext (${ERPNEXT_BRANCH})"
 if [[ ! -d "apps/erpnext" ]]; then
