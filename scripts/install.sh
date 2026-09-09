@@ -18,17 +18,12 @@ die()  { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 trap 'printf "\n[ERROR] Installation failed at line %s. Re-run ./scripts/status.sh for diagnostics.\n" "$LINENO" >&2' ERR
 
-if [[ "$(uname -s)" != "Linux" ]]; then
-  die "This laboratory expects a Linux GitHub Codespace."
-fi
-
-if ! command -v sudo >/dev/null 2>&1; then
-  die "sudo is required."
-fi
+[[ "$(uname -s)" == "Linux" ]] || die "This laboratory expects a Linux GitHub Codespace."
+command -v sudo >/dev/null 2>&1 || die "sudo is required."
 
 log "1/10 - Checking available resources"
 df -h / | tail -n 1 || true
-if command -v free >/dev/null 2>&1; then free -h; fi
+command -v free >/dev/null 2>&1 && free -h || true
 warn "The build phase can temporarily consume considerably more RAM than normal execution."
 
 log "2/10 - Installing minimal system dependencies"
@@ -58,12 +53,18 @@ default-character-set = utf8mb4
 EOF
 sudo service mariadb restart
 
-# Debian/Ubuntu normally authenticates local root through unix_socket. Set a known
-# password as well so bench new-site can run non-interactively in this disposable lab.
-sudo mariadb <<SQL
+# First run normally has unix_socket authentication; subsequent runs use the
+# known lab password. Support both paths so the script remains repeatable.
+if sudo mariadb -e 'SELECT 1' >/dev/null 2>&1; then
+  sudo mariadb <<SQL
 ALTER USER 'root'@'localhost' IDENTIFIED BY '${DB_ROOT_PASSWORD}';
 FLUSH PRIVILEGES;
 SQL
+elif mariadb -uroot -p"$DB_ROOT_PASSWORD" -e 'SELECT 1' >/dev/null 2>&1; then
+  ok "MariaDB root password already configured"
+else
+  die "Unable to authenticate to MariaDB as root."
+fi
 ok "MariaDB configured"
 
 log "4/10 - Starting Redis"
@@ -72,7 +73,6 @@ redis-cli ping | grep -q PONG || die "Redis did not answer PONG."
 ok "Redis is running"
 
 log "5/10 - Installing Node.js, Yarn and Bench"
-# Frappe v15 requires Node 18+. NodeSource 20 LTS is used to avoid distro-version drift.
 if ! command -v node >/dev/null 2>&1 || [[ "$(node -p 'Number(process.versions.node.split(`.`)[0])' 2>/dev/null || echo 0)" -lt 18 ]]; then
   curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
   sudo DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
@@ -82,7 +82,6 @@ if ! command -v yarn >/dev/null 2>&1; then
   sudo npm install --global yarn
 fi
 
-# Install uv in the user's home, then install Bench as an isolated CLI tool.
 if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
@@ -132,7 +131,6 @@ fi
 log "10/10 - Applying development configuration"
 bench use "$SITE_NAME"
 bench set-config -g developer_mode 1
-bench set-config -g server_script_enabled 1
 bench --site "$SITE_NAME" clear-cache
 
 cat <<EOF
